@@ -59,9 +59,12 @@
                     <p class="text-xs text-red-500 mt-1 italic" id="adapter-warning" style="display: none;">(Browser status may conflict with OS setting)</p>
                 </div>
                 <!-- NEW: Location Permission Status (Required on many platforms) -->
-                <div class="flex justify-between items-center pb-2 border-b border-blue-200">
-                    <span class="font-medium text-gray-700">Location Permission:</span>
-                    <span id="location-permission-status" class="font-bold text-gray-500">Checking...</span>
+                <div class="flex flex-col">
+                    <div class="flex justify-between items-center pb-2 border-b border-blue-200">
+                        <span class="font-medium text-gray-700">Location Permission:</span>
+                        <span id="location-permission-status" class="font-bold text-gray-500">Checking...</span>
+                    </div>
+                    <p class="text-xs text-yellow-600 mt-1 italic" id="location-hint" style="display: none;">Click "Request Permission" below if status is PROMPT.</p>
                 </div>
                 
                 <!-- Connection Status -->
@@ -70,6 +73,14 @@
                     <span id="connection-state" class="font-bold text-gray-700">Idle</span>
                 </div>
             </div>
+
+            <!-- Permission Request Button -->
+            <button id="request-permission-button"
+                    class="action-button bg-yellow-600 text-white hover:bg-yellow-700 mb-4"
+                    onclick="requestLocationPermission()">
+                Request Location Permission
+            </button>
+
 
             <!-- Action Buttons (New Layout) -->
             <div class="grid grid-cols-3 gap-4">
@@ -112,6 +123,8 @@
         const BLUETOOTH_AVAILABILITY_ELEM = document.getElementById('bluetooth-availability');
         const ADAPTER_WARNING_ELEM = document.getElementById('adapter-warning');
         const LOCATION_PERMISSION_ELEM = document.getElementById('location-permission-status');
+        const LOCATION_HINT_ELEM = document.getElementById('location-hint');
+        const REQUEST_PERMISSION_BUTTON = document.getElementById('request-permission-button');
         const CONNECTION_STATE_ELEM = document.getElementById('connection-state');
         const CONNECT_BUTTON = document.getElementById('connect-button');
         const DISCONNECT_BUTTON = document.getElementById('disconnect-button');
@@ -185,8 +198,73 @@
                     break;
             }
         }
-
+        
+        // --- Function to request location permission (to change status from PROMPT) ---
+        function requestLocationPermission() {
+            if ('geolocation' in navigator) {
+                log("Requesting Geolocation permission to satisfy Bluetooth scan requirement...", 'text-yellow-700');
+                
+                // This call triggers the native permission prompt
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        log(`Geolocation succeeded. Permission is likely GRANTED. Lat: ${position.coords.latitude}`, 'text-green-600');
+                        checkLocationPermission(); // Re-check status
+                    },
+                    (error) => {
+                        // This fires if permission is denied, or if location services are disabled on OS
+                        if (error.code === error.PERMISSION_DENIED) {
+                            log("Geolocation FAILED. Permission was DENIED or blocked.", 'text-red-600');
+                        } else {
+                            log(`Geolocation failed unexpectedly: ${error.message}`, 'text-red-500');
+                        }
+                        checkLocationPermission(); // Re-check status
+                    },
+                    { enableHighAccuracy: false, timeout: 5000, maximumAge: 0 }
+                );
+            } else {
+                log("Geolocation API not available in this browser.", 'text-gray-500');
+            }
+        }
+        
         // --- 1. Check for Web Bluetooth Support on Load ---
+        async function checkLocationPermission() {
+            if ('permissions' in navigator) {
+                try {
+                    const permissionStatus = await navigator.permissions.query({ name: 'geolocation' });
+                    LOCATION_PERMISSION_ELEM.textContent = permissionStatus.state.toUpperCase();
+                    LOCATION_PERMISSION_ELEM.classList.remove('text-gray-500', 'text-green-600', 'text-yellow-600', 'text-red-600');
+                    LOCATION_HINT_ELEM.style.display = 'none';
+
+                    if (permissionStatus.state === 'granted') {
+                        LOCATION_PERMISSION_ELEM.classList.add('text-green-600');
+                        REQUEST_PERMISSION_BUTTON.disabled = true;
+                        REQUEST_PERMISSION_BUTTON.textContent = 'Permission Granted';
+                        log("Location permission confirmed as GRANTED. Ready for Bluetooth scan.", 'text-green-600');
+                    } else if (permissionStatus.state === 'prompt') {
+                        LOCATION_PERMISSION_ELEM.classList.add('text-yellow-600');
+                        LOCATION_HINT_ELEM.style.display = 'block';
+                        REQUEST_PERMISSION_BUTTON.disabled = false;
+                        REQUEST_PERMISSION_BUTTON.textContent = 'Request Location Permission';
+                        log("Location permission is 'PROMPT'. Click the button to request permission.", 'text-yellow-600');
+                    } else { // 'denied'
+                        LOCATION_PERMISSION_ELEM.classList.add('text-red-600');
+                        REQUEST_PERMISSION_BUTTON.disabled = true;
+                        REQUEST_PERMISSION_BUTTON.textContent = 'Permission Denied';
+                        log("Location permission is 'DENIED'. This will block Bluetooth scanning.", 'text-red-600');
+                    }
+                } catch (e) {
+                    LOCATION_PERMISSION_ELEM.textContent = 'N/A';
+                    LOCATION_PERMISSION_ELEM.classList.add('text-gray-500');
+                    log("Location permission check failed (Permissions API error).", 'text-gray-500');
+                    REQUEST_PERMISSION_BUTTON.disabled = true;
+                }
+            } else {
+                LOCATION_PERMISSION_ELEM.textContent = 'N/A';
+                LOCATION_PERMISSION_ELEM.classList.add('text-gray-500');
+                REQUEST_PERMISSION_BUTTON.disabled = true;
+            }
+        }
+        
         async function checkBluetoothSupport() {
             // 1. Check API support
             if (!('bluetooth' in navigator)) {
@@ -209,48 +287,22 @@
                 
                 if (available) {
                     BLUETOOTH_AVAILABILITY_ELEM.classList.add('text-green-600');
+                    ADAPTER_WARNING_ELEM.style.display = 'none';
                 } else {
                     BLUETOOTH_AVAILABILITY_ELEM.classList.add('text-red-600');
-                    // Show warning about potential mismatch if browser reports OFF
                     ADAPTER_WARNING_ELEM.style.display = 'block';
                     log("Browser reports Bluetooth radio as OFF via API. Note: This status may conflict with your OS settings.", 'text-red-500');
                 }
             } catch (e) {
                 BLUETOOTH_AVAILABILITY_ELEM.textContent = 'Unknown/Error';
-                BLUETOOTH_AVAILABILITY_ELEM.classList.remove('text-gray-500');
                 BLUETOOTH_AVAILABILITY_ELEM.classList.add('text-red-500');
+                ADAPTER_WARNING_ELEM.style.display = 'none';
                 log(`Failed to check Bluetooth availability: ${e.message}`, 'text-red-500');
             }
 
 
-            // 3. Check Location Permission (Required for scanning on many systems like Android)
-            if ('permissions' in navigator) {
-                try {
-                    // Check geolocation permissions as this is often tied to Bluetooth on Android/Chrome
-                    const permissionStatus = await navigator.permissions.query({ name: 'geolocation' });
-                    LOCATION_PERMISSION_ELEM.textContent = permissionStatus.state.toUpperCase();
-                    LOCATION_PERMISSION_ELEM.classList.remove('text-gray-500');
-                    
-                    if (permissionStatus.state === 'granted') {
-                        LOCATION_PERMISSION_ELEM.classList.add('text-green-600');
-                    } else if (permissionStatus.state === 'prompt') {
-                        LOCATION_PERMISSION_ELEM.classList.add('text-yellow-600');
-                        log("Location permission is 'PROMPT'. This may be required to scan for devices.", 'text-yellow-600');
-                    } else { // 'denied'
-                        LOCATION_PERMISSION_ELEM.classList.add('text-red-600');
-                        log("Location permission is 'DENIED'. This is a common cause of immediate scan failure.", 'text-red-600');
-                    }
-                } catch (e) {
-                    LOCATION_PERMISSION_ELEM.textContent = 'N/A';
-                    LOCATION_PERMISSION_ELEM.classList.remove('text-gray-500');
-                    LOCATION_PERMISSION_ELEM.classList.add('text-gray-500');
-                    log("Location permission check failed (Permissions API not fully supported).", 'text-gray-500');
-                }
-            } else {
-                LOCATION_PERMISSION_ELEM.textContent = 'N/A';
-                LOCATION_PERMISSION_ELEM.classList.remove('text-gray-500');
-                LOCATION_PERMISSION_ELEM.classList.add('text-gray-500');
-            }
+            // 3. Check Location Permission (Now separate, async function)
+            await checkLocationPermission();
             
             updateUIState('idle'); // Set initial state
         }
@@ -295,7 +347,7 @@
                 g_device = null; // Clear device on failure
                 if (error.name === 'NotFoundError') {
                     updateUIState('cancelled');
-                    // This is the key log: If the user says they didn't cancel, this means the dialog failed to appear due to a system issue (like permissions)
+                    // This is the key log: If the user says they didn't cancel, this means the dialog failed to appear due to a system issue (like permissions or adapter state)
                     log("Operation cancelled by user (dialog closed/no device selected). If you did not cancel, this indicates a failure to launch the OS device dialog.", 'text-yellow-600');
                 } else {
                     updateUIState('error', error.name);
