@@ -115,7 +115,8 @@
             margin-top: 15px;
             font-size: 0.9rem;
             color: #ffaaaa;
-            display: none; /* Hidden by default */
+            /* Display is controlled by JS when an error occurs */
+            display: none; 
         }
     </style>
 </head>
@@ -134,8 +135,9 @@
         
         <div id="errorHelp" class="error-help">
             <strong>Troubleshooting:</strong><br>
-            1. Ensure this site is loaded via <strong>HTTPS</strong>.<br>
-            2. On Quest: Go to <code>chrome://flags</code>, search "Web Bluetooth", set to ENABLED, and restart browser.
+            1. **Crucial:** Please **unpair** the sensor from the Quest's main Bluetooth settings first.<br>
+            2. Ensure this site is loaded via **HTTPS**.<br>
+            3. On Quest: Go to <code>chrome://flags</code>, search "Web Bluetooth", set to ENABLED, and restart browser.
         </div>
         
         <!-- Debug Info (Hidden by default, useful for dev) -->
@@ -145,8 +147,9 @@
     <script>
         // --- Configuration ---
         // UUIDs for the standard Cycling Speed and Cadence Service
-        const SERVICE_UUID = 'cycling_speed_and_cadence'; // 0x1816
-        const CHARACTERISTIC_UUID = 'csc_measurement';    // 0x2A5B
+        // Using numerical hex codes for better compatibility on some platforms (like Quest browser)
+        const SERVICE_UUID = 0x1816; // Cycling Speed and Cadence Service
+        const CHARACTERISTIC_UUID = 0x2A5B;    // CSC Measurement Characteristic
 
         // --- State ---
         let device = null;
@@ -199,7 +202,7 @@
                 statusDisplay.classList.add('pulsing');
                 
                 // 1. Request Bluetooth Device
-                // We verify standard Cycling Speed and Cadence service
+                // We verify standard Cycling Speed and Cadence service using the hex code
                 device = await navigator.bluetooth.requestDevice({
                     filters: [{ services: [SERVICE_UUID] }]
                 });
