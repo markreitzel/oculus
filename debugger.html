@@ -41,7 +41,7 @@
                 </div>
                 
                 <div class="flex justify-between items-center pb-3 border-b border-gray-100">
-                    <span class="text-sm font-medium text-gray-500">Connection State:</span>
+                    <span id="connection-state-label" class="text-sm font-medium text-gray-500">Connection State:</span>
                     <span id="connection-state" class="font-semibold text-sm text-gray-700">Idle</span>
                 </div>
             </div>
@@ -111,6 +111,9 @@
                 log("Bluetooth API is not available.", 'text-red-600');
                 return;
             }
+
+            // Clear log for a fresh attempt
+            LOG_ELEM.innerHTML = '<p class="text-gray-500">Starting new connection attempt...</p>';
 
             // Disable button and update UI
             CONNECT_BUTTON.disabled = true;
