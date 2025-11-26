@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Bluetooth Debugger</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        .container {
+            min-height: 100vh;
+        }
+        .status-box {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+
+    <div id="app" class="container max-w-2xl mx-auto flex flex-col items-center justify-center">
+
+        <header class="w-full text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">Web Bluetooth Diagnostics</h1>
+            <p class="text-gray-600">Click below to attempt a connection and check for errors.</p>
+        </header>
+
+        <div class="w-full bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+
+            <!-- Connection Status Display -->
+            <div class="space-y-4">
+                <div class="flex justify-between items-center pb-3 border-b border-gray-100">
+                    <span class="text-sm font-medium text-gray-500">Bluetooth API Status:</span>
+                    <span id="api-status" class="font-semibold text-sm">Checking...</span>
+                </div>
+                
+                <div class="flex justify-between items-center pb-3 border-b border-gray-100">
+                    <span class="text-sm font-medium text-gray-500">Connection State:</span>
+                    <span id="connection-state" class="font-semibold text-sm text-gray-700">Idle</span>
+                </div>
+            </div>
+
+            <!-- Action Button -->
+            <button id="connect-button" 
+                    class="mt-6 w-full py-3 px-4 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition duration-300 disabled:opacity-50"
+                    onclick="connectSensor()">
+                Connect to Sensor Device
+            </button>
+
+            <!-- Detailed Status Log -->
+            <h2 class="text-lg font-semibold mt-8 mb-4 text-gray-700">Detailed Status Log</h2>
+            <div id="log" class="bg-gray-50 p-4 rounded-lg border h-40 overflow-y-auto text-sm text-gray-800 space-y-1">
+                <p class="text-gray-500">Ready to start debugging.</p>
+            </div>
+
+        </div>
+
+        <!-- Guide -->
+        <div class="status-box bg-yellow-100 text-yellow-800 mt-8 w-full border border-yellow-300">
+            <p class="font-bold mb-1">Debugging Tip:</p>
+            <p>If you see a `NotFoundError`, it means the user closed the device selection popup without choosing a device (you should handle this silently). If you see a `SecurityError` or similar, check your `requestDevice` filters!</p>
+        </div>
+    </div>
+
+    <script>
+        const API_STATUS_ELEM = document.getElementById('api-status');
+        const CONNECTION_STATE_ELEM = document.getElementById('connection-state');
+        const CONNECT_BUTTON = document.getElementById('connect-button');
+        const LOG_ELEM = document.getElementById('log');
+
+        /**
+         * Utility function to append a message to the log.
+         * @param {string} message - The message to log.
+         * @param {string} colorClass - Tailwind color class for emphasis (e.g., 'text-green-600').
+         */
+        function log(message, colorClass = 'text-gray-800') {
+            const time = new Date().toLocaleTimeString();
+            const p = document.createElement('p');
+            p.className = colorClass;
+            p.innerHTML = `[${time}] ${message}`;
+            LOG_ELEM.prepend(p);
+            // Limit log size for performance
+            while (LOG_ELEM.children.length > 20) {
+                LOG_ELEM.removeChild(LOG_ELEM.lastChild);
+            }
+        }
+
+        // --- 1. Check for Web Bluetooth Support on Load ---
+        function checkBluetoothSupport() {
+            if ('bluetooth' in navigator) {
+                API_STATUS_ELEM.textContent = 'Supported';
+                API_STATUS_ELEM.classList.add('text-green-600');
+                log("Web Bluetooth API is available.");
+            } else {
+                API_STATUS_ELEM.textContent = 'Not Supported';
+                API_STATUS_ELEM.classList.add('text-red-600');
+                CONNECT_BUTTON.disabled = true;
+                log("Web Bluetooth API not found. Please use Chrome/Edge on Desktop/Android.", 'text-red-600');
+            }
+        }
+
+        // --- 2. Connection Logic ---
+        async function connectSensor() {
+            if (!('bluetooth' in navigator)) {
+                log("Bluetooth API is not available.", 'text-red-600');
+                return;
+            }
+
+            // Disable button and update UI
+            CONNECT_BUTTON.disabled = true;
+            CONNECT_BUTTON.textContent = 'Scanning...';
+            CONNECTION_STATE_ELEM.textContent = 'Scanning for devices...';
+            CONNECTION_STATE_ELEM.classList.remove('text-gray-700', 'text-green-600', 'text-red-600');
+            CONNECTION_STATE_ELEM.classList.add('text-blue-500');
+            log("Attempting to request device...", 'text-blue-500');
+
+            try {
+                // IMPORTANT: Replace this with your specific service UUIDs (e.g., '19b10000-e8f2-537e-4f6c-d104768a1214')
+                const options = {
+                    // Try to scan for all devices for broad compatibility, or use 'filters'
+                    acceptAllDevices: true, 
+                    // Add your sensor's primary service UUIDs here:
+                    optionalServices: [
+                        'battery_service', 
+                        'generic_access', 
+                        // 'YOUR_SERVICE_UUID_HERE'
+                    ] 
+                };
+                
+                // Request the device
+                const device = await navigator.bluetooth.requestDevice(options);
+
+                log(`Device found: ${device.name || 'Unnamed Device'}`, 'text-blue-600');
+                CONNECTION_STATE_ELEM.textContent = 'Device Found';
+
+                // Attempt to connect to the GATT server
+                const server = await device.gatt.connect();
+
+                // SUCCESS
+                CONNECTION_STATE_ELEM.textContent = 'Connected!';
+                CONNECTION_STATE_ELEM.classList.remove('text-blue-500');
+                CONNECTION_STATE_ELEM.classList.add('text-green-600');
+                CONNECT_BUTTON.textContent = 'Connected (Disconnect?)';
+                log(`Successfully connected to GATT server for ${device.name || 'Unnamed Device'}!`, 'text-green-600');
+                
+                // You would typically get services and characteristics here...
+
+            } catch (error) {
+                // FAILURE
+                CONNECTION_STATE_ELEM.classList.remove('text-blue-500');
+                CONNECTION_STATE_ELEM.classList.add('text-red-600');
+
+                if (error.name === 'NotFoundError') {
+                    CONNECTION_STATE_ELEM.textContent = 'Connection Cancelled';
+                    log("Connection attempt cancelled by user (dialog closed/no device selected).", 'text-yellow-600');
+                    CONNECT_BUTTON.textContent = 'Connect to Sensor Device';
+                } else {
+                    CONNECTION_STATE_ELEM.textContent = 'Connection Failed (Check Log)';
+                    log(`FATAL ERROR: ${error.name} - ${error.message}`, 'text-red-600');
+                    CONNECT_BUTTON.textContent = 'Connect to Sensor Device (Retry)';
+                }
+            } finally {
+                CONNECT_BUTTON.disabled = false;
+            }
+        }
+
+        // Run initialization check
+        window.onload = checkBluetoothSupport;
+
+    </script>
+</body>
+</html>
