@@ -28,6 +28,9 @@
             background: #d1d5db;
             border-radius: 10px;
         }
+        .action-button {
+            @apply w-full py-3 px-4 font-semibold rounded-xl shadow-lg transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.01] text-sm;
+        }
     </style>
 </head>
 <body class="p-4 sm:p-8">
@@ -54,12 +57,24 @@
                 </div>
             </div>
 
-            <!-- Action Button -->
-            <button id="connect-button" 
-                    class="w-full py-3 px-4 bg-blue-600 text-white font-semibold rounded-xl shadow-lg hover:bg-blue-700 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.01]"
-                    onclick="connectSensor()">
-                Connect to Sensor Device
-            </button>
+            <!-- Action Buttons (New Layout) -->
+            <div class="grid grid-cols-3 gap-4">
+                <button id="connect-button" 
+                        class="action-button bg-blue-600 text-white hover:bg-blue-700"
+                        onclick="connectSensor()">
+                    Connect
+                </button>
+                <button id="disconnect-button" 
+                        class="action-button bg-gray-400 text-white hover:bg-gray-500"
+                        onclick="disconnectSensor()" disabled>
+                    Disconnect
+                </button>
+                <button id="read-button" 
+                        class="action-button bg-green-600 text-white hover:bg-green-700"
+                        onclick="readData()" disabled>
+                    Read Data
+                </button>
+            </div>
 
             <!-- FATAL ERROR DISPLAY (Prominent placement) -->
             <div id="fatal-error-display" class="hidden mt-6 status-box bg-red-100 text-red-800 border border-red-300">
@@ -82,9 +97,13 @@
         const API_STATUS_ELEM = document.getElementById('api-status');
         const CONNECTION_STATE_ELEM = document.getElementById('connection-state');
         const CONNECT_BUTTON = document.getElementById('connect-button');
+        const DISCONNECT_BUTTON = document.getElementById('disconnect-button');
+        const READ_BUTTON = document.getElementById('read-button');
         const LOG_ELEM = document.getElementById('log');
         const FATAL_ERROR_DISPLAY = document.getElementById('fatal-error-display');
         const ERROR_MESSAGE_CODE = document.getElementById('error-message');
+
+        let g_device = null; // Global variable to store the connected device object
 
         /**
          * Utility function to append a message to the log.
@@ -103,12 +122,59 @@
             }
         }
 
+        /**
+         * Updates the state of the buttons and connection status display.
+         * @param {string} state - 'idle', 'scanning', 'connected', or 'error'.
+         */
+        function updateUIState(state, message = '') {
+            CONNECTION_STATE_ELEM.classList.remove('text-gray-700', 'text-green-600', 'text-red-600', 'text-yellow-600', 'text-blue-600');
+            
+            switch (state) {
+                case 'idle':
+                    CONNECTION_STATE_ELEM.textContent = 'Idle';
+                    CONNECTION_STATE_ELEM.classList.add('text-gray-700');
+                    CONNECT_BUTTON.disabled = false;
+                    DISCONNECT_BUTTON.disabled = true;
+                    READ_BUTTON.disabled = true;
+                    break;
+                case 'scanning':
+                    CONNECTION_STATE_ELEM.textContent = 'Scanning...';
+                    CONNECTION_STATE_ELEM.classList.add('text-blue-600');
+                    CONNECT_BUTTON.disabled = true;
+                    DISCONNECT_BUTTON.disabled = true;
+                    READ_BUTTON.disabled = true;
+                    break;
+                case 'connected':
+                    CONNECTION_STATE_ELEM.textContent = `Connected to ${g_device.name || 'Device'}`;
+                    CONNECTION_STATE_ELEM.classList.add('text-green-600');
+                    CONNECT_BUTTON.disabled = true;
+                    DISCONNECT_BUTTON.disabled = false;
+                    READ_BUTTON.disabled = false;
+                    break;
+                case 'cancelled':
+                    CONNECTION_STATE_ELEM.textContent = 'Cancelled by User';
+                    CONNECTION_STATE_ELEM.classList.add('text-yellow-600');
+                    CONNECT_BUTTON.disabled = false;
+                    DISCONNECT_BUTTON.disabled = true;
+                    READ_BUTTON.disabled = true;
+                    break;
+                case 'error':
+                    CONNECTION_STATE_ELEM.textContent = `Failed (${message})`;
+                    CONNECTION_STATE_ELEM.classList.add('text-red-600');
+                    CONNECT_BUTTON.disabled = false;
+                    DISCONNECT_BUTTON.disabled = true;
+                    READ_BUTTON.disabled = true;
+                    break;
+            }
+        }
+
         // --- 1. Check for Web Bluetooth Support on Load ---
         function checkBluetoothSupport() {
             if ('bluetooth' in navigator) {
                 API_STATUS_ELEM.textContent = 'Supported';
                 API_STATUS_ELEM.classList.add('text-green-600');
                 log("Web Bluetooth API is available.");
+                updateUIState('idle'); // Set initial state
             } else {
                 API_STATUS_ELEM.textContent = 'Not Supported';
                 API_STATUS_ELEM.classList.add('text-red-600');
@@ -119,77 +185,86 @@
 
         // --- 2. Connection Logic ---
         async function connectSensor() {
-            if (!('bluetooth' in navigator)) {
-                log("Bluetooth API is not available.", 'text-red-600');
-                return;
-            }
+            if (!('bluetooth' in navigator)) return;
             
-            // Hide previous error messages
             FATAL_ERROR_DISPLAY.classList.add('hidden');
-
-            // Clear log for a fresh attempt
             LOG_ELEM.innerHTML = '<p class="text-gray-500">Starting new connection attempt...</p>';
-
-            // Disable button and update UI
-            CONNECT_BUTTON.disabled = true;
-            CONNECT_BUTTON.textContent = 'Scanning...';
-            CONNECTION_STATE_ELEM.textContent = 'Scanning for devices...';
-            CONNECTION_STATE_ELEM.classList.remove('text-gray-700', 'text-green-600', 'text-red-600', 'text-yellow-600');
-            CONNECTION_STATE_ELEM.classList.add('text-blue-600');
+            updateUIState('scanning');
             log("Attempting to request device...", 'text-blue-600');
 
             try {
-                // Using acceptAllDevices: true is necessary for debugging where the failure occurs.
+                // Using acceptAllDevices: true for broad compatibility while debugging
                 const options = {
                     acceptAllDevices: true, 
                     optionalServices: [
                         'battery_service', 
                         'generic_access', 
-                        // Add your custom UUIDs here if you suspect filtering issues: '12345678-1234-5678-1234-56789abcdef0'
+                        // Add your custom UUIDs here if filtering: '12345678-1234-5678-1234-56789abcdef0'
                     ] 
                 };
                 
                 // Request the device - this is the line that should trigger the dialog
                 const device = await navigator.bluetooth.requestDevice(options);
 
-                // If the code reaches here, the user selected a device.
-                log(`Device found: ${device.name || 'Unnamed Device'}`, 'text-green-700');
-                CONNECTION_STATE_ELEM.textContent = 'Device Found';
+                // Add listener for unexpected disconnects
+                device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
+
+                g_device = device;
+                log(`Device found: ${device.name || 'Unnamed Device'}`, 'text-blue-500');
 
                 // Attempt to connect to the GATT server
-                const server = await device.gatt.connect();
+                await device.gatt.connect();
 
                 // SUCCESS
-                CONNECTION_STATE_ELEM.textContent = 'Connected!';
-                CONNECTION_STATE_ELEM.classList.remove('text-blue-600');
-                CONNECTION_STATE_ELEM.classList.add('text-green-600');
-                CONNECT_BUTTON.textContent = 'Connected (Disconnect?)';
+                updateUIState('connected');
                 log(`Successfully connected to GATT server for ${device.name || 'Unnamed Device'}!`, 'text-green-600');
                 
             } catch (error) {
-                // FAILURE
-                CONNECTION_STATE_ELEM.classList.remove('text-blue-600');
-                CONNECTION_STATE_ELEM.classList.add('text-red-600');
-
+                g_device = null; // Clear device on failure
                 if (error.name === 'NotFoundError') {
-                    // This is expected if the user clicks cancel or closes the dialog.
-                    CONNECTION_STATE_ELEM.textContent = 'Cancelled by User';
+                    updateUIState('cancelled');
                     log("Operation cancelled by user (dialog closed/no device selected).", 'text-yellow-600');
-                    CONNECT_BUTTON.textContent = 'Connect to Sensor Device';
                 } else {
-                    // Immediate, fatal error before dialog appeared or during connection setup.
-                    CONNECTION_STATE_ELEM.textContent = 'Connection Failed (Fatal Error)';
+                    updateUIState('error', error.name);
                     
                     const fullError = `${error.name}: ${error.message}`;
                     ERROR_MESSAGE_CODE.textContent = fullError;
                     FATAL_ERROR_DISPLAY.classList.remove('hidden');
                     
                     log(`FATAL ERROR: ${fullError}`, 'text-red-600');
-                    CONNECT_BUTTON.textContent = 'Connect to Sensor Device (Retry)';
                 }
-            } finally {
-                CONNECT_BUTTON.disabled = false;
             }
+        }
+
+        // --- 3. Disconnection Logic ---
+        function disconnectSensor() {
+            if (g_device && g_device.gatt.connected) {
+                g_device.gatt.disconnect();
+                // onDeviceDisconnected will handle the UI update
+            } else {
+                log("Device is already disconnected or not available.", 'text-gray-500');
+                updateUIState('idle');
+            }
+        }
+
+        // --- 4. Disconnect Event Handler ---
+        function onDeviceDisconnected(event) {
+            const device = event.target;
+            log(`Device ${device.name || 'Unnamed Device'} disconnected.`, 'text-red-400');
+            g_device = null;
+            updateUIState('idle');
+        }
+
+        // --- 5. Read Data Placeholder (Further Interaction) ---
+        function readData() {
+            if (!g_device || !g_device.gatt.connected) {
+                log("Cannot read data: Not connected.", 'text-red-500');
+                updateUIState('error', 'Not connected');
+                return;
+            }
+            log("Attempting to read data... (Placeholder function)", 'text-green-500');
+            // In a real application, you would perform getPrimaryService, getCharacteristic, and readValue here.
+            log("Data read simulated. Needs real GATT interaction.", 'text-green-500');
         }
 
         // Run initialization check
