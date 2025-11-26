@@ -45,15 +45,26 @@
         <div class="w-full bg-white p-6 rounded-2xl shadow-2xl border border-gray-100">
             
             <!-- Unified Status Card -->
-            <div class="bg-blue-50 p-4 rounded-xl border border-blue-200 mb-6 space-y-3">
+            <div class="bg-blue-50 p-4 rounded-xl border border-blue-200 mb-6 space-y-3 text-sm">
+                <!-- NEW: API Support and Adapter Status -->
                 <div class="flex justify-between items-center">
-                    <span class="text-sm font-medium text-gray-700">API Support:</span>
-                    <span id="api-status" class="font-bold text-sm text-gray-500">Checking...</span>
+                    <span class="font-medium text-gray-700">API Support:</span>
+                    <span id="api-status" class="font-bold text-gray-500">Checking...</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="font-medium text-gray-700">Bluetooth Adapter:</span>
+                    <span id="bluetooth-availability" class="font-bold text-gray-500">Checking...</span>
+                </div>
+                <!-- NEW: Location Permission Status (Required on many platforms) -->
+                <div class="flex justify-between items-center pb-2 border-b border-blue-200">
+                    <span class="font-medium text-gray-700">Location Permission:</span>
+                    <span id="location-permission-status" class="font-bold text-gray-500">Checking...</span>
                 </div>
                 
-                <div class="flex justify-between items-center">
-                    <span class="text-sm font-medium text-gray-700">Connection Status:</span>
-                    <span id="connection-state" class="font-bold text-sm text-gray-700">Idle</span>
+                <!-- Connection Status -->
+                <div class="flex justify-between items-center pt-2">
+                    <span class="font-medium text-gray-700">Connection Status:</span>
+                    <span id="connection-state" class="font-bold text-gray-700">Idle</span>
                 </div>
             </div>
 
@@ -80,7 +91,7 @@
             <div id="fatal-error-display" class="hidden mt-6 status-box bg-red-100 text-red-800 border border-red-300">
                 <p class="font-bold mb-1 text-base">Immediate Failure Detected</p>
                 <code id="error-message" class="block bg-red-200 p-2 rounded text-xs whitespace-pre-wrap text-red-900 font-mono"></code>
-                <p class="text-sm mt-2">This means the device dialog failed to open. Check OS permissions or system Bluetooth state.</p>
+                <p class="text-sm mt-2">This means the device dialog failed to open. Check OS permissions, system Bluetooth state, or try a different browser.</p>
             </div>
 
             <!-- Detailed Status Log -->
@@ -95,6 +106,8 @@
 
     <script>
         const API_STATUS_ELEM = document.getElementById('api-status');
+        const BLUETOOTH_AVAILABILITY_ELEM = document.getElementById('bluetooth-availability');
+        const LOCATION_PERMISSION_ELEM = document.getElementById('location-permission-status');
         const CONNECTION_STATE_ELEM = document.getElementById('connection-state');
         const CONNECT_BUTTON = document.getElementById('connect-button');
         const DISCONNECT_BUTTON = document.getElementById('disconnect-button');
@@ -124,7 +137,8 @@
 
         /**
          * Updates the state of the buttons and connection status display.
-         * @param {string} state - 'idle', 'scanning', 'connected', or 'error'.
+         * @param {string} state - 'idle', 'scanning', 'connected', 'cancelled', or 'error'.
+         * @param {string} message - Optional error message snippet.
          */
         function updateUIState(state, message = '') {
             CONNECTION_STATE_ELEM.classList.remove('text-gray-700', 'text-green-600', 'text-red-600', 'text-yellow-600', 'text-blue-600');
@@ -169,18 +183,67 @@
         }
 
         // --- 1. Check for Web Bluetooth Support on Load ---
-        function checkBluetoothSupport() {
-            if ('bluetooth' in navigator) {
-                API_STATUS_ELEM.textContent = 'Supported';
-                API_STATUS_ELEM.classList.add('text-green-600');
-                log("Web Bluetooth API is available.");
-                updateUIState('idle'); // Set initial state
-            } else {
+        async function checkBluetoothSupport() {
+            // 1. Check API support
+            if (!('bluetooth' in navigator)) {
                 API_STATUS_ELEM.textContent = 'Not Supported';
                 API_STATUS_ELEM.classList.add('text-red-600');
                 CONNECT_BUTTON.disabled = true;
                 log("Web Bluetooth API not found. Please use Chrome/Edge on Desktop/Android.", 'text-red-600');
+                return;
             }
+            API_STATUS_ELEM.textContent = 'Supported';
+            API_STATUS_ELEM.classList.add('text-green-600');
+            log("Web Bluetooth API is available.");
+
+
+            // 2. Check Adapter Availability
+            try {
+                const available = await navigator.bluetooth.getAvailability();
+                BLUETOOTH_AVAILABILITY_ELEM.textContent = available ? 'ON' : 'OFF';
+                BLUETOOTH_AVAILABILITY_ELEM.classList.remove('text-gray-500');
+                BLUETOOTH_AVAILABILITY_ELEM.classList.add(available ? 'text-green-600' : 'text-red-600');
+                if (!available) {
+                    log("Bluetooth radio is reported as OFF by the system. Turn on your system's Bluetooth.", 'text-red-500');
+                }
+            } catch (e) {
+                BLUETOOTH_AVAILABILITY_ELEM.textContent = 'Unknown/Error';
+                BLUETOOTH_AVAILABILITY_ELEM.classList.remove('text-gray-500');
+                BLUETOOTH_AVAILABILITY_ELEM.classList.add('text-red-500');
+                log(`Failed to check Bluetooth availability: ${e.message}`, 'text-red-500');
+            }
+
+
+            // 3. Check Location Permission (Required for scanning on many systems like Android)
+            if ('permissions' in navigator) {
+                try {
+                    // Check geolocation permissions as this is often tied to Bluetooth on Android/Chrome
+                    const permissionStatus = await navigator.permissions.query({ name: 'geolocation' });
+                    LOCATION_PERMISSION_ELEM.textContent = permissionStatus.state.toUpperCase();
+                    LOCATION_PERMISSION_ELEM.classList.remove('text-gray-500');
+                    
+                    if (permissionStatus.state === 'granted') {
+                        LOCATION_PERMISSION_ELEM.classList.add('text-green-600');
+                    } else if (permissionStatus.state === 'prompt') {
+                        LOCATION_PERMISSION_ELEM.classList.add('text-yellow-600');
+                        log("Location permission is 'PROMPT'. This may be required to scan for devices.", 'text-yellow-600');
+                    } else { // 'denied'
+                        LOCATION_PERMISSION_ELEM.classList.add('text-red-600');
+                        log("Location permission is 'DENIED'. This is a common cause of immediate scan failure.", 'text-red-600');
+                    }
+                } catch (e) {
+                    LOCATION_PERMISSION_ELEM.textContent = 'N/A';
+                    LOCATION_PERMISSION_ELEM.classList.remove('text-gray-500');
+                    LOCATION_PERMISSION_ELEM.classList.add('text-gray-500');
+                    log("Location permission check failed (Permissions API not fully supported).", 'text-gray-500');
+                }
+            } else {
+                LOCATION_PERMISSION_ELEM.textContent = 'N/A';
+                LOCATION_PERMISSION_ELEM.classList.remove('text-gray-500');
+                LOCATION_PERMISSION_ELEM.classList.add('text-gray-500');
+            }
+            
+            updateUIState('idle'); // Set initial state
         }
 
         // --- 2. Connection Logic ---
