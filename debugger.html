@@ -59,6 +59,12 @@
                 <p class="text-gray-500">Ready to start debugging.</p>
             </div>
 
+            <!-- FATAL ERROR DISPLAY (New addition for immediate errors) -->
+            <div id="fatal-error-display" class="hidden mt-4 status-box bg-red-100 text-red-800 border border-red-300">
+                <p class="font-bold mb-1">Immediate Failure Detected (Copy/Paste this error):</p>
+                <code id="error-message" class="block bg-red-200 p-2 rounded text-xs whitespace-pre-wrap"></code>
+            </div>
+
         </div>
 
         <!-- Guide -->
@@ -73,6 +79,8 @@
         const CONNECTION_STATE_ELEM = document.getElementById('connection-state');
         const CONNECT_BUTTON = document.getElementById('connect-button');
         const LOG_ELEM = document.getElementById('log');
+        const FATAL_ERROR_DISPLAY = document.getElementById('fatal-error-display');
+        const ERROR_MESSAGE_CODE = document.getElementById('error-message');
 
         /**
          * Utility function to append a message to the log.
@@ -111,6 +119,9 @@
                 log("Bluetooth API is not available.", 'text-red-600');
                 return;
             }
+            
+            // Hide previous error messages
+            FATAL_ERROR_DISPLAY.classList.add('hidden');
 
             // Clear log for a fresh attempt
             LOG_ELEM.innerHTML = '<p class="text-gray-500">Starting new connection attempt...</p>';
@@ -124,19 +135,20 @@
             log("Attempting to request device...", 'text-blue-500');
 
             try {
-                // IMPORTANT: Replace this with your specific service UUIDs (e.g., '19b10000-e8f2-537e-4f6c-d104768a1214')
+                // IMPORTANT: Since you are getting an immediate error, we must verify your environment can even open the dialog 
+                // using the current, permissive settings. If you need to filter, use the 'filters' property instead of 'acceptAllDevices'.
                 const options = {
-                    // Try to scan for all devices for broad compatibility, or use 'filters'
+                    // Try to scan for all devices for broad compatibility
                     acceptAllDevices: true, 
                     // Add your sensor's primary service UUIDs here:
                     optionalServices: [
                         'battery_service', 
                         'generic_access', 
-                        // 'YOUR_SERVICE_UUID_HERE'
+                        // If you have a custom service UUID, add it here in the format: '12345678-1234-5678-1234-56789abcdef0'
                     ] 
                 };
                 
-                // Request the device
+                // Request the device - this is the line that should trigger the dialog
                 const device = await navigator.bluetooth.requestDevice(options);
 
                 log(`Device found: ${device.name || 'Unnamed Device'}`, 'text-blue-600');
@@ -164,8 +176,15 @@
                     log("Connection attempt cancelled by user (dialog closed/no device selected).", 'text-yellow-600');
                     CONNECT_BUTTON.textContent = 'Connect to Sensor Device';
                 } else {
-                    CONNECTION_STATE_ELEM.textContent = 'Connection Failed (Check Log)';
-                    log(`FATAL ERROR: ${error.name} - ${error.message}`, 'text-red-600');
+                    // Immediate, fatal error before dialog appeared
+                    CONNECTION_STATE_ELEM.textContent = 'Connection Failed (Fatal Error)';
+                    
+                    // Display the full error message prominently
+                    const fullError = `${error.name}: ${error.message}`;
+                    ERROR_MESSAGE_CODE.textContent = fullError;
+                    FATAL_ERROR_DISPLAY.classList.remove('hidden');
+                    
+                    log(`FATAL ERROR: ${fullError}`, 'text-red-600');
                     CONNECT_BUTTON.textContent = 'Connect to Sensor Device (Retry)';
                 }
             } finally {
