@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quest 2 Cycling HUD</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #000;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden; /* Prevent scrolling in VR */
+        }
+        
+        /* High contrast neon styling for VR readability */
+        .neon-text {
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.7), 
+                         0 0 20px rgba(0, 255, 255, 0.5);
+        }
+        
+        .hud-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            width: 100vw;
+            background: radial-gradient(circle at center, #1a1a1a 0%, #000000 100%);
+        }
+
+        .rpm-gauge {
+            width: 300px;
+            height: 300px;
+            border-radius: 50%;
+            border: 8px solid #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            margin-bottom: 2rem;
+            background: rgba(20, 20, 20, 0.8);
+            box-shadow: 0 0 50px rgba(0, 255, 255, 0.1);
+        }
+
+        .rpm-value {
+            font-size: 6rem;
+            font-weight: bold;
+            color: #0ff;
+        }
+
+        .rpm-label {
+            position: absolute;
+            bottom: 40px;
+            font-size: 1.5rem;
+            color: #888;
+            letter-spacing: 2px;
+        }
+
+        /* Dynamic border based on intensity */
+        .zone-low { border-color: #3b82f6; box-shadow: 0 0 30px #3b82f6; }
+        .zone-med { border-color: #22c55e; box-shadow: 0 0 30px #22c55e; }
+        .zone-high { border-color: #ef4444; box-shadow: 0 0 30px #ef4444; }
+
+        .btn {
+            background: #2563eb;
+            color: white;
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            border-radius: 50px;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.2s, background 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: bold;
+        }
+
+        .btn:hover {
+            transform: scale(1.05);
+            background: #1d4ed8;
+        }
+
+        .btn:disabled {
+            background: #555;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #status {
+            margin-top: 20px;
+            color: #888;
+            font-size: 1rem;
+        }
+
+        /* Animation for connecting state */
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .pulsing {
+            animation: pulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="hud-container">
+        <!-- Main RPM Gauge -->
+        <div id="gauge" class="rpm-gauge zone-low">
+            <span id="rpmDisplay" class="rpm-value neon-text">--</span>
+            <span class="rpm-label">RPM</span>
+        </div>
+
+        <!-- Controls -->
+        <button id="connectBtn" class="btn">Connect Sensor</button>
+        <div id="status">Ready to pair with Cycling Speed & Cadence Sensor</div>
+        
+        <!-- Debug Info (Hidden by default, useful for dev) -->
+        <div id="debug" style="position: absolute; bottom: 10px; left: 10px; font-size: 12px; color: #444; text-align: left;"></div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        // UUIDs for the standard Cycling Speed and Cadence Service
+        const SERVICE_UUID = 'cycling_speed_and_cadence'; // 0x1816
+        const CHARACTERISTIC_UUID = 'csc_measurement';    // 0x2A5B
+
+        // --- State ---
+        let device = null;
+        let server = null;
+        let characteristic = null;
+        
+        // Data processing state
+        let lastCrankRevs = 0;
+        let lastCrankTime = 0;
+        let firstReading = true;
+
+        // UI Elements
+        const connectBtn = document.getElementById('connectBtn');
+        const rpmDisplay = document.getElementById('rpmDisplay');
+        const statusDisplay = document.getElementById('status');
+        const gauge = document.getElementById('gauge');
+        const debugDiv = document.getElementById('debug');
+
+        // --- Event Listeners ---
+        connectBtn.addEventListener('click', toggleConnection);
+
+        async function toggleConnection() {
+            if (device && device.gatt.connected) {
+                disconnect();
+            } else {
+                connect();
+            }
+        }
+
+        async function connect() {
+            try {
+                statusDisplay.textContent = "Scanning for sensors...";
+                statusDisplay.classList.add('pulsing');
+                
+                // 1. Request Bluetooth Device
+                // We verify standard Cycling Speed and Cadence service
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [SERVICE_UUID] }]
+                });
+
+                statusDisplay.textContent = "Connecting to " + device.name + "...";
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+
+                // 2. Connect to GATT Server
+                server = await device.gatt.connect();
+                
+                // 3. Get Service
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                
+                // 4. Get Characteristic
+                characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+                
+                // 5. Start Notifications
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', handleNotifications);
+
+                // UI Updates
+                connectBtn.textContent = "Disconnect";
+                connectBtn.style.background = "#ef4444"; // Red for disconnect
+                statusDisplay.textContent = "Connected! Start pedaling.";
+                statusDisplay.classList.remove('pulsing');
+                
+            } catch (error) {
+                console.error("Connection failed", error);
+                statusDisplay.textContent = "Connection failed: " + error.message;
+                statusDisplay.classList.remove('pulsing');
+            }
+        }
+
+        function disconnect() {
+            if (device) {
+                if (device.gatt.connected) {
+                    device.gatt.disconnect();
+                }
+            }
+        }
+
+        function onDisconnected() {
+            connectBtn.textContent = "Connect Sensor";
+            connectBtn.style.background = "#2563eb";
+            rpmDisplay.textContent = "--";
+            statusDisplay.textContent = "Device disconnected.";
+            resetState();
+        }
+
+        function resetState() {
+            lastCrankRevs = 0;
+            lastCrankTime = 0;
+            firstReading = true;
+            updateZone(0);
+        }
+
+        // --- Data Parsing Logic ---
+        function handleNotifications(event) {
+            const value = event.target.value;
+            // The Data View allows us to read bits and bytes
+            // See Bluetooth Spec: https://www.bluetooth.com/specifications/specs/
+            
+            // Byte 0: Flags
+            // Bit 0: Wheel Revolution Data Present (0 = False, 1 = True)
+            // Bit 1: Crank Revolution Data Present (0 = False, 1 = True)
+            const flags = value.getUint8(0);
+            
+            const wheelRevPresent = flags & 0x01;
+            const crankRevPresent = flags & 0x02;
+
+            let offset = 1; // Start after flags byte
+
+            // If wheel data is present, skip it (4 bytes for revs, 2 bytes for time)
+            if (wheelRevPresent) {
+                offset += 6;
+            }
+
+            // We only care about Crank data for a cadence app
+            if (crankRevPresent) {
+                // Crank Cumulative Revolutions (UINT16)
+                const cumulativeCrankRevs = value.getUint16(offset, true); // true = Little Endian
+                offset += 2;
+                
+                // Last Crank Event Time (UINT16) in 1/1024 seconds
+                const lastCrankEventTime = value.getUint16(offset, true);
+
+                calculateCadence(cumulativeCrankRevs, lastCrankEventTime);
+            } else {
+                debugDiv.innerText = "Data received, but no crank data flag.";
+            }
+        }
+
+        function calculateCadence(currentRevs, currentTime) {
+            if (firstReading) {
+                lastCrankRevs = currentRevs;
+                lastCrankTime = currentTime;
+                firstReading = false;
+                return;
+            }
+
+            // Handle Rollover for Revolutions (UINT16 max is 65535)
+            let revsDiff = currentRevs - lastCrankRevs;
+            if (revsDiff < 0) revsDiff += 65536;
+
+            // Handle Rollover for Time (UINT16 max is 65535)
+            let timeDiff = currentTime - lastCrankTime;
+            if (timeDiff < 0) timeDiff += 65536;
+
+            // Update state for next reading
+            lastCrankRevs = currentRevs;
+            lastCrankTime = currentTime;
+
+            // Avoid division by zero or extremely small diffs (noise)
+            if (timeDiff > 0 && revsDiff > 0) {
+                // Calculate RPM
+                // timeDiff is in 1/1024 seconds. 
+                // Formula: (Revs / (TimeDiff / 1024)) * 60
+                const timeSeconds = timeDiff / 1024;
+                const rpm = Math.round((revsDiff / timeSeconds) * 60);
+
+                // Filter unrealistic values (e.g., > 200 RPM usually implies error or initial burst)
+                if (rpm < 200) {
+                    updateDisplay(rpm);
+                }
+            } else if (revsDiff === 0) {
+                // If we receive data but revs haven't changed, user stopped pedaling?
+                // Often sensors stop sending updates when stopped, so we might need a timeout 
+                // to zero out the display, but we'll leave the last value for now or logic here.
+            }
+        }
+
+        // --- UI Updates ---
+        let zeroTimeout;
+
+        function updateDisplay(rpm) {
+            rpmDisplay.textContent = rpm;
+            updateZone(rpm);
+            
+            // Auto-zero if no new data comes in for 4 seconds
+            clearTimeout(zeroTimeout);
+            zeroTimeout = setTimeout(() => {
+                rpmDisplay.textContent = 0;
+                updateZone(0);
+            }, 4000);
+        }
+
+        function updateZone(rpm) {
+            gauge.className = 'rpm-gauge'; // reset
+            if (rpm < 60) {
+                gauge.classList.add('zone-low'); // Blue/Rest
+            } else if (rpm >= 60 && rpm < 90) {
+                gauge.classList.add('zone-med'); // Green/Active
+            } else {
+                gauge.classList.add('zone-high'); // Red/Sprint
+            }
+        }
+    </script>
+</body>
+</html>
