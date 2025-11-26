@@ -92,6 +92,9 @@
             margin-top: 20px;
             color: #888;
             font-size: 1rem;
+            text-align: center;
+            max-width: 600px;
+            line-height: 1.5;
         }
 
         /* Animation for connecting state */
@@ -102,6 +105,17 @@
         }
         .pulsing {
             animation: pulse 1.5s infinite;
+        }
+        
+        .error-help {
+            background: rgba(255, 0, 0, 0.2);
+            border: 1px solid red;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
+            font-size: 0.9rem;
+            color: #ffaaaa;
+            display: none; /* Hidden by default */
         }
     </style>
 </head>
@@ -117,6 +131,12 @@
         <!-- Controls -->
         <button id="connectBtn" class="btn">Connect Sensor</button>
         <div id="status">Ready to pair with Cycling Speed & Cadence Sensor</div>
+        
+        <div id="errorHelp" class="error-help">
+            <strong>Troubleshooting:</strong><br>
+            1. Ensure this site is loaded via <strong>HTTPS</strong>.<br>
+            2. On Quest: Go to <code>chrome://flags</code>, search "Web Bluetooth", set to ENABLED, and restart browser.
+        </div>
         
         <!-- Debug Info (Hidden by default, useful for dev) -->
         <div id="debug" style="position: absolute; bottom: 10px; left: 10px; font-size: 12px; color: #444; text-align: left;"></div>
@@ -144,6 +164,19 @@
         const statusDisplay = document.getElementById('status');
         const gauge = document.getElementById('gauge');
         const debugDiv = document.getElementById('debug');
+        const errorHelp = document.getElementById('errorHelp');
+
+        // --- Initialization Check ---
+        window.addEventListener('load', () => {
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                showError("HTTPS Required. Web Bluetooth will not work on http://");
+                return;
+            }
+            
+            if (!navigator.bluetooth) {
+                showError("Web Bluetooth API not found. Please enable 'Web Bluetooth' in chrome://flags");
+            }
+        });
 
         // --- Event Listeners ---
         connectBtn.addEventListener('click', toggleConnection);
@@ -158,6 +191,10 @@
 
         async function connect() {
             try {
+                // Clear previous errors
+                errorHelp.style.display = 'none';
+                statusDisplay.style.color = '#888';
+                
                 statusDisplay.textContent = "Scanning for sensors...";
                 statusDisplay.classList.add('pulsing');
                 
@@ -191,9 +228,25 @@
                 
             } catch (error) {
                 console.error("Connection failed", error);
-                statusDisplay.textContent = "Connection failed: " + error.message;
-                statusDisplay.classList.remove('pulsing');
+                let msg = error.message || error.toString();
+                
+                // Detect the specific "not available" error
+                if (msg.includes("Bluetooth low energy is not available") || msg.includes("adapter not available")) {
+                    showError("Bluetooth Adapter Unavailable. Please check chrome://flags.");
+                } else if (msg.includes("User cancelled")) {
+                     statusDisplay.textContent = "Pairing cancelled.";
+                     statusDisplay.classList.remove('pulsing');
+                } else {
+                    showError("Connection failed: " + msg);
+                }
             }
+        }
+
+        function showError(msg) {
+            statusDisplay.textContent = msg;
+            statusDisplay.style.color = "#ff5555";
+            statusDisplay.classList.remove('pulsing');
+            errorHelp.style.display = 'block'; // Show the help box
         }
 
         function disconnect() {
@@ -209,6 +262,7 @@
             connectBtn.style.background = "#2563eb";
             rpmDisplay.textContent = "--";
             statusDisplay.textContent = "Device disconnected.";
+            statusDisplay.style.color = "#888";
             resetState();
         }
 
