@@ -118,6 +118,19 @@
             /* Display is controlled by JS when an error occurs */
             display: none; 
         }
+        
+        #debug {
+            position: absolute; 
+            bottom: 10px; 
+            left: 10px; 
+            font-size: 12px; 
+            color: #ccc; 
+            text-align: left;
+            line-height: 1.5;
+            padding: 5px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
+        }
     </style>
 </head>
 <body>
@@ -140,8 +153,8 @@
             3. On Quest: Go to <code>chrome://flags</code>, search "Web Bluetooth", set to ENABLED, and restart browser.
         </div>
         
-        <!-- Debug Info (Hidden by default, useful for dev) -->
-        <div id="debug" style="position: absolute; bottom: 10px; left: 10px; font-size: 12px; color: #444; text-align: left;"></div>
+        <!-- Debug Info -->
+        <div id="debug"></div>
     </div>
 
     <script>
@@ -169,15 +182,35 @@
         const debugDiv = document.getElementById('debug');
         const errorHelp = document.getElementById('errorHelp');
 
+        // --- Debugging Function ---
+        function updateDebugInfo(status) {
+            let btStatus = !!navigator.bluetooth ? 
+                '<span style="color: limegreen;">Found</span>' : 
+                '<span style="color: red;">Not Found</span>';
+                
+            let connectionState = device && device.gatt ? 
+                (device.gatt.connected ? '<span style="color: yellow;">Connected</span>' : 'Disconnected') : 
+                'Idle';
+
+            let debugMessage = `
+                Status: ${status}<br>
+                Web Bluetooth API: ${btStatus}<br>
+                Connection State: ${connectionState}
+            `;
+            debugDiv.innerHTML = debugMessage;
+        }
+        
         // --- Initialization Check ---
         window.addEventListener('load', () => {
+            updateDebugInfo("App Loaded");
+            
             if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
                 showError("HTTPS Required. Web Bluetooth will not work on http://");
                 return;
             }
             
             if (!navigator.bluetooth) {
-                showError("Web Bluetooth API not found. Please enable 'Web Bluetooth' in chrome://flags");
+                showError("Web Bluetooth API not found. Please ensure the Web Bluetooth flag is enabled in chrome://flags.");
             }
         });
 
@@ -200,6 +233,7 @@
                 
                 statusDisplay.textContent = "Scanning for sensors...";
                 statusDisplay.classList.add('pulsing');
+                updateDebugInfo("Scanning...");
                 
                 // 1. Request Bluetooth Device
                 // We verify standard Cycling Speed and Cadence service using the hex code
@@ -228,6 +262,7 @@
                 connectBtn.style.background = "#ef4444"; // Red for disconnect
                 statusDisplay.textContent = "Connected! Start pedaling.";
                 statusDisplay.classList.remove('pulsing');
+                updateDebugInfo("Connected");
                 
             } catch (error) {
                 console.error("Connection failed", error);
@@ -235,13 +270,14 @@
                 
                 // Detect the specific "not available" error
                 if (msg.includes("Bluetooth low energy is not available") || msg.includes("adapter not available")) {
-                    showError("Bluetooth Adapter Unavailable. Please check chrome://flags.");
+                    showError("Bluetooth Adapter Unavailable. This requires enabling a Chrome flag on Quest.");
                 } else if (msg.includes("User cancelled")) {
                      statusDisplay.textContent = "Pairing cancelled.";
                      statusDisplay.classList.remove('pulsing');
                 } else {
                     showError("Connection failed: " + msg);
                 }
+                updateDebugInfo("Connection Failed (Error)");
             }
         }
 
@@ -250,6 +286,7 @@
             statusDisplay.style.color = "#ff5555";
             statusDisplay.classList.remove('pulsing');
             errorHelp.style.display = 'block'; // Show the help box
+            updateDebugInfo("Error: " + msg);
         }
 
         function disconnect() {
@@ -267,6 +304,7 @@
             statusDisplay.textContent = "Device disconnected.";
             statusDisplay.style.color = "#888";
             resetState();
+            updateDebugInfo("Disconnected");
         }
 
         function resetState() {
