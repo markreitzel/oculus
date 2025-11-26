@@ -51,9 +51,12 @@
                     <span class="font-medium text-gray-700">API Support:</span>
                     <span id="api-status" class="font-bold text-gray-500">Checking...</span>
                 </div>
-                <div class="flex justify-between items-center">
-                    <span class="font-medium text-gray-700">Bluetooth Adapter:</span>
-                    <span id="bluetooth-availability" class="font-bold text-gray-500">Checking...</span>
+                <div class="flex flex-col">
+                    <div class="flex justify-between items-center">
+                        <span class="font-medium text-gray-700">Bluetooth Adapter:</span>
+                        <span id="bluetooth-availability" class="font-bold text-gray-500">Checking...</span>
+                    </div>
+                    <p class="text-xs text-red-500 mt-1 italic" id="adapter-warning" style="display: none;">(Browser status may conflict with OS setting)</p>
                 </div>
                 <!-- NEW: Location Permission Status (Required on many platforms) -->
                 <div class="flex justify-between items-center pb-2 border-b border-blue-200">
@@ -107,6 +110,7 @@
     <script>
         const API_STATUS_ELEM = document.getElementById('api-status');
         const BLUETOOTH_AVAILABILITY_ELEM = document.getElementById('bluetooth-availability');
+        const ADAPTER_WARNING_ELEM = document.getElementById('adapter-warning');
         const LOCATION_PERMISSION_ELEM = document.getElementById('location-permission-status');
         const CONNECTION_STATE_ELEM = document.getElementById('connection-state');
         const CONNECT_BUTTON = document.getElementById('connect-button');
@@ -202,9 +206,14 @@
                 const available = await navigator.bluetooth.getAvailability();
                 BLUETOOTH_AVAILABILITY_ELEM.textContent = available ? 'ON' : 'OFF';
                 BLUETOOTH_AVAILABILITY_ELEM.classList.remove('text-gray-500');
-                BLUETOOTH_AVAILABILITY_ELEM.classList.add(available ? 'text-green-600' : 'text-red-600');
-                if (!available) {
-                    log("Bluetooth radio is reported as OFF by the system. Turn on your system's Bluetooth.", 'text-red-500');
+                
+                if (available) {
+                    BLUETOOTH_AVAILABILITY_ELEM.classList.add('text-green-600');
+                } else {
+                    BLUETOOTH_AVAILABILITY_ELEM.classList.add('text-red-600');
+                    // Show warning about potential mismatch if browser reports OFF
+                    ADAPTER_WARNING_ELEM.style.display = 'block';
+                    log("Browser reports Bluetooth radio as OFF via API. Note: This status may conflict with your OS settings.", 'text-red-500');
                 }
             } catch (e) {
                 BLUETOOTH_AVAILABILITY_ELEM.textContent = 'Unknown/Error';
@@ -286,7 +295,8 @@
                 g_device = null; // Clear device on failure
                 if (error.name === 'NotFoundError') {
                     updateUIState('cancelled');
-                    log("Operation cancelled by user (dialog closed/no device selected).", 'text-yellow-600');
+                    // This is the key log: If the user says they didn't cancel, this means the dialog failed to appear due to a system issue (like permissions)
+                    log("Operation cancelled by user (dialog closed/no device selected). If you did not cancel, this indicates a failure to launch the OS device dialog.", 'text-yellow-600');
                 } else {
                     updateUIState('error', error.name);
                     
