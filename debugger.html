@@ -315,16 +315,16 @@
             LOG_ELEM.innerHTML = '<p class="text-gray-500">Starting new connection attempt...</p>';
             updateUIState('scanning');
             log("Attempting to request device...", 'text-blue-600');
+            
+            // Diagnostic check right before calling the API
+            const locStatus = LOCATION_PERMISSION_ELEM.textContent;
+            log(`Current Location Permission state before request: ${locStatus}`, locStatus === 'GRANTED' ? 'text-green-600' : 'text-red-600');
 
             try {
-                // Using acceptAllDevices: true for broad compatibility while debugging
+                // Using acceptAllDevices: true for maximum compatibility
+                // Removed optionalServices array to ensure the broadest possible scan filter
                 const options = {
                     acceptAllDevices: true, 
-                    optionalServices: [
-                        'battery_service', 
-                        'generic_access', 
-                        // Add your custom UUIDs here if filtering: '12345678-1234-5678-1234-56789abcdef0'
-                    ] 
                 };
                 
                 // Request the device - this is the line that should trigger the dialog
